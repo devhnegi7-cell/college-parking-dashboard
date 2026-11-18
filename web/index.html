@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Manage campus parking slots, live vehicle entries and exits, and parking passes.">
+<title>CampusPark · College Parking Dashboard</title>
+<link rel="stylesheet" href="/design.css">
+<script src="/dashboard.js" type="module"></script>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="#overview" aria-label="CampusPark overview"><span class="logomark">P</span><span>CampusPark<small>Parking management</small></span></a>
+    <nav aria-label="Dashboard pages">
+      <span class="nav-label">Workspace</span>
+      <a href="#overview" data-view="overview"><span data-icon="grid"></span>Overview</a>
+      <a href="#slots" data-view="slots"><span data-icon="map"></span>Parking slots</a>
+      <a href="#log" data-view="log"><span data-icon="list"></span>Entry &amp; exit log</a>
+      <a href="#vehicles" data-view="vehicles"><span data-icon="car"></span>Vehicles</a>
+      <a href="#passes" data-view="passes"><span data-icon="pass"></span>Parking passes</a>
+    </nav>
+    <div class="sidefoot"><span class="side-icon" data-icon="building"></span><span><strong>College Campus</strong><small>Parking operations</small></span></div>
+  </aside>
+  <section class="work">
+    <header class="topbar"><div class="breadcrumb">Parking management <span aria-hidden="true">/</span> <strong id="crumb">Overview</strong></div><div class="top-meta"><span id="today"></span><span class="avatar" title="Campus administrator">CP</span></div></header>
+    <main id="main">
+      <section class="pagehead"><div><div class="section-kicker" id="kicker">CAMPUS OPERATIONS</div><h1 id="title">Parking overview</h1><p id="subtitle">Monitor campus parking and manage vehicle movements.</p></div><div class="actions" id="actions"></div></section>
+      <div id="status" class="status" role="status"><span></span><span id="statusText">Connecting to parking register…</span></div>
+      <div id="content" aria-busy="true"><div class="panel loading">Loading parking records…</div></div>
+    </main>
+  </section>
+</div>
+<dialog id="dialog"></dialog>
+<div role="status" id="toast" class="toast" hidden></div>
+</body>
+</html>
