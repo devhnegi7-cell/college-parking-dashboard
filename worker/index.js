@@ -6,6 +6,12 @@ const dayAtCampus = (date = new Date()) => new Intl.DateTimeFormat('en-CA', {
 const iso = () => new Date().toISOString();
 const types = ['Car', 'Two-wheeler'];
 const passTypes = ['Semester', 'Temporary'];
+const samplePlates = [
+  'HR51QZ4816', 'HR51ZX7324', 'HR29ZV2958', 'HR26QY6149',
+  'HR51ZW3827', 'HR29ZX9572', 'HR51QY2463', 'HR26ZV8147',
+  'HR51ZX1376', 'HR29ZW5628', 'HR51QZ7935', 'HR26ZX4382',
+  'HR51ZV9026', 'HR29QY3164', 'HR51ZW6752', 'HR26QZ5289'
+];
 const plate = value => String(value ?? '').toUpperCase().replace(/[\s-]/g, '');
 const clean = (value, max = 80) => String(value ?? '').trim().slice(0, max);
 const dateValid = value => /^\d{4}-\d{2}-\d{2}$/.test(value) &&
@@ -13,8 +19,7 @@ const dateValid = value => /^\d{4}-\d{2}-\d{2}$/.test(value) &&
 const run = (db, query, ...values) => db.prepare(query).bind(...values);
 const row = (db, query, ...values) => run(db, query, ...values).first();
 
-async function initialize(db) {
-  if (await row(db, 'SELECT id FROM configuration WHERE id = 1')) return;
+async function seedDemoVehicles(db, includeOpenVisits) {
   const now = Date.now(), ago = minutes => new Date(now - minutes * 60000).toISOString();
   const date = days => dayAtCampus(new Date(now + days * 86400000));
   const names = [
@@ -37,17 +42,12 @@ async function initialize(db) {
     const id = -(i + 1), student = 'DEMO' + String(101+i), kind = types[i % 3 === 0 ? 0 : 1];
     queue('INSERT OR IGNORE INTO student (id, first_name, last_name, department, semester) VALUES (?, ?, ?, ?, ?)', student, first, last, dept, 3);
     queue('INSERT OR IGNORE INTO vehicle (id, student_id, plate, type, brand, model) VALUES (?, ?, ?, ?, ?, ?)',
-      id, student, 'DEMO' + String(1001+i), kind, kind === 'Car' ? 'Maruti Suzuki' : 'Honda', kind === 'Car' ? 'Swift' : 'Activa');
+      id, student, samplePlates[i], kind, kind === 'Car' ? 'Maruti Suzuki' : 'Honda', kind === 'Car' ? 'Swift' : 'Activa');
     queue('INSERT OR IGNORE INTO parking_pass VALUES (?, ?, ?, ?, ?)',
       id, student, i % 4 ? 'Semester' : 'Temporary', date(-45), date(i === 14 ? -2 : i === 13 ? 3 : 21 + i));
     const zone = kind === 'Car' ? 'A-' : 'C-', slot = zone + String(++nextSlot[kind]).padStart(2, '0');
-    if (i < 12) {
+    if (includeOpenVisits && i < 12) {
       queue('INSERT OR IGNORE INTO parking_record VALUES (?, ?, ?, ?, ?, NULL)', id, id, slot, id, ago(9 + i * 12));
-    }
-    for (let d = 0; d < 7; d++) {
-      const minutesAgo = 160 + (d * 1440) + ((i * 47 + d * 51) % 490);
-      const entered = ago(minutesAgo), exited = ago(Math.max(160 + d * 1440, minutesAgo - (31 + (i * 13) % 150)));
-      queue('INSERT OR IGNORE INTO parking_record VALUES (?, ?, ?, ?, ?, ?)', -(101 + i * 7 + d), id, slot, id, entered, exited);
     }
   }
   queue('INSERT OR IGNORE INTO configuration VALUES (1, ?)', iso());
@@ -61,6 +61,79 @@ async function initialize(db) {
     }
   }
   await db.batch(statements);
+}
+
+const historyVersion = 1;
+const samplePlateVersion = 2;
+
+function demoVisits() {
+  const dayMs = 86400000;
+  const midnight = Date.parse(dayAtCampus() + 'T00:00:00+05:30');
+  const visits = [];
+  for (let daysAgo = 14; daysAgo >= 1; daysAgo--) {
+    const start = midnight - daysAgo * dayMs;
+    const seed = Math.floor(start / dayMs);
+    const weekday = new Date(start + 19800000).getUTCDay();
+    const weekend = weekday === 0 || weekday === 6;
+    const count = weekend ? 2 + seed % 4 : 9 + seed % 6;
+    for (let index = 0; index < count; index++) {
+      const vehicle = (index * 5 + seed) % 16;
+      const code = vehicle % 3 === 0
+        ? ((seed + index) % 3 === 0 ? 'B' : 'A')
+        : ((seed + index) % 3 === 0 ? 'D' : 'C');
+      const slot = code + '-' + String(vehicle + 1).padStart(2, '0');
+      const variation = (seed * 37 + vehicle * 53) % 103;
+      const arrival = weekend ? 560 + variation : (index < count - 2 ? 465 : 635) + variation;
+      const duration = weekend ? 74 + variation : 145 + ((variation * 7 + index * 23) % 274);
+      const timestamp = minutes => new Date(start + minutes * 60000).toISOString();
+      visits.push([-(1000 + daysAgo * 16 + index), -(vehicle + 1), slot,
+        timestamp(arrival), timestamp(arrival + duration), dayAtCampus(new Date(start))]);
+    }
+  }
+  return visits;
+}
+
+async function initialize(db) {
+  const state = await row(db, `SELECT
+    EXISTS (SELECT 1 FROM configuration WHERE id = 1) AS initialized,
+    EXISTS (SELECT 1 FROM demo_history WHERE version = ?) AS history_loaded,
+    EXISTS (SELECT 1 FROM demo_history WHERE version = ?) AS sample_plates_updated`, historyVersion, samplePlateVersion);
+  if (!state.sample_plates_updated) {
+    await db.batch([
+      run(db, `UPDATE OR IGNORE vehicle
+        SET plate = sample.value
+        FROM json_each(?) AS sample
+        WHERE vehicle.id = -1 - sample.key AND vehicle.plate = 'DEMO' || (1000 - vehicle.id)`,
+        JSON.stringify(samplePlates)),
+      run(db, 'INSERT OR IGNORE INTO demo_history (version, loaded_at) VALUES (?, ?)', samplePlateVersion, iso())
+    ]);
+  }
+  if (state.history_loaded) return;
+  const hasDemoVehicles = await row(db, 'SELECT id FROM vehicle WHERE id BETWEEN -16 AND -1 LIMIT 1');
+  if (!state.initialized || !hasDemoVehicles) await seedDemoVehicles(db, !state.initialized);
+
+  // Replace only the old generated history. Retain open visits and manually logged activity.
+  await db.batch([
+    run(db, `DELETE FROM parking_record WHERE id BETWEEN -212 AND -101
+      AND exited IS NOT NULL AND NOT EXISTS (SELECT 1 FROM demo_history WHERE version = ?)`, historyVersion),
+    run(db, `INSERT OR IGNORE INTO parking_record (id, vehicle_id, slot_id, pass_id, entered, exited)
+      SELECT json_extract(item.value, '$[0]'), vehicle.id, slot.id, pass.id,
+        json_extract(item.value, '$[3]'), json_extract(item.value, '$[4]')
+      FROM json_each(?) AS item
+      JOIN vehicle ON vehicle.id = json_extract(item.value, '$[1]')
+      JOIN parking_slot AS slot ON slot.id = json_extract(item.value, '$[2]')
+      JOIN parking_pass AS pass ON pass.id = vehicle.id AND pass.student_id = vehicle.student_id
+      WHERE slot.type = vehicle.type
+        AND json_extract(item.value, '$[5]') BETWEEN pass.issued AND pass.expires
+        AND NOT EXISTS (SELECT 1 FROM demo_history WHERE version = ?)
+        AND NOT EXISTS (
+          SELECT 1 FROM parking_record AS visit
+          WHERE (visit.slot_id = slot.id OR visit.vehicle_id = vehicle.id)
+            AND visit.entered < json_extract(item.value, '$[4]')
+            AND (visit.exited IS NULL OR visit.exited > json_extract(item.value, '$[3]'))
+        )`, JSON.stringify(demoVisits()), historyVersion),
+    run(db, 'INSERT OR IGNORE INTO demo_history (version, loaded_at) VALUES (?, ?)', historyVersion, iso())
+  ]);
 }
 
 async function snapshot(db) {

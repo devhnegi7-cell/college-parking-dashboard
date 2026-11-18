@@ -35,14 +35,15 @@ const filters = {
   slots:{ kind:'all', area:'all', availability:'all' },
   log:{ q:'', date:'', activity:'all' },
   vehicles:{ q:'' }, passes:{ q:'', validity:'all' },
-  overview:{ span:'today', metric:'movement' }
+  overview:{ span:'fortnight', metric:'movement' }
 };
 const getView = () => Object.hasOwn(views, location.hash.slice(1)) ? location.hash.slice(1) : 'overview';
 const isOpen = record => !record.exited;
 const vehicleIcon = type => type === 'Car' ? 'car' : 'bike';
 const nameOf = student => student ? student.first_name + ' ' + student.last_name : 'Unknown student';
 const pill = (label, tone = '') => '<span class="pill '+tone+'">'+esc(label)+'</span>';
-const plateLabel = v => '<span class="table-id"><span class="plate-icon">'+icon(vehicleIcon(v.type))+'</span><strong>'+esc(v.plate)+'</strong></span>';
+const displayPlate = plate => plate.replace(/^([A-Z]{2})([0-9]{2})([A-Z]{1,3})([0-9]{4})$/, '$1 $2 $3 $4');
+const plateLabel = v => '<span class="table-id"><span class="plate-icon">'+icon(vehicleIcon(v.type))+'</span><strong>'+esc(displayPlate(v.plate))+'</strong></span>';
 const btn = (title, glyph, action, primary = false, attrs = '') => '<button class="button '+(primary?'primary':'')+'" type="button" data-dialog="'+action+'" '+attrs+'>'+icon(glyph)+esc(title)+'</button>';
 const field = (label, inner) => '<label class="field"><span>'+esc(label)+'</span>'+inner+'</label>';
 const options = (choices, selected) => choices.map(([key,label])=>'<option value="'+esc(key)+'"'+(key===selected?' selected':'')+'>'+esc(label)+'</option>').join('');
@@ -96,14 +97,16 @@ function traffic() {
   const {span,metric}=filters.overview, occupancy=metric==='occupancy';
   const filtersHtml = '<div class="chart-filters"><select class="compact" aria-label="Chart metric" data-filter="metric" id="filter-metric">'+
     options([['movement','Movement'],['occupancy','Occupancy']],metric)+'</select><select class="compact" aria-label="Chart date range" data-filter="span" id="filter-span">'+
-    options([['today','Today'],['yesterday','Yesterday'],['week','Last 7 days']],span)+'</select></div>';
-  const midnight = asDate(data.date).getTime(), week = span==='week';
-  const first = midnight - (week ? 6 : span==='yesterday' ? 1 : 0)*86400000;
-  const step = week ? 86400000 : 7200000;
+    options([['today','Today'],['yesterday','Yesterday'],['week','Last 7 days'],['fortnight','Last 14 full days']],span)+'</select></div>';
+  const midnight = asDate(data.date).getTime();
+  const fortnight = span === 'fortnight';
+  const daily = span === 'week' || fortnight;
+  const first = midnight - (fortnight ? 14 : span === 'week' ? 6 : span === 'yesterday' ? 1 : 0) * 86400000;
+  const step = daily ? 86400000 : 7200000;
   const events = data.records.flatMap(r=>[{time:Date.parse(r.entered),delta:1},...(r.exited?[{time:Date.parse(r.exited),delta:-1}]:[])])
     .sort((a,b)=>a.time-b.time || a.delta-b.delta);
   let active = 0, cursor = 0;
-  const groups = Array.from({length:week?7:12},(_,i)=>{
+  const groups = Array.from({length:fortnight?14:daily?7:12},(_,i)=>{
     const start=first+i*step, end=start+step;
     while(cursor<events.length && events[cursor].time<start) active+=events[cursor++].delta;
     let peak=active, arrival=0, departure=0;
@@ -114,8 +117,8 @@ function traffic() {
       peak=Math.max(peak,active);
     }
     const observed = start <= Date.parse(data.updated);
-    return { label:week?shortDay.format(new Date(start)):String(i*2).padStart(2,'0')+':00',
-      ticks:week||i%2===0, amounts:occupancy?[observed?peak:0]:[arrival,departure] };
+    return { label:daily?shortDay.format(new Date(start)):String(i*2).padStart(2,'0')+':00',
+      ticks:span==='week'||i%2===0||(fortnight&&i===13), amounts:occupancy?[observed?peak:0]:[arrival,departure] };
   });
   const max = Math.max(4, Math.ceil(Math.max(...groups.flatMap(g=>g.amounts))/4)*4);
   const labels=occupancy?['Peak vehicles parked']:['Entries','Exits'];
@@ -125,7 +128,7 @@ function traffic() {
     return '<div class="bucket" title="'+esc(tooltip)+'">'+g.amounts.map((v,i)=>'<i class="'+modifier(i)+'" style="height:'+(v / max * 100)+'%"></i>').join('')+(g.ticks?'<b>'+esc(g.label)+'</b>':'')+'</div>';
   }).join('');
   const legend=labels.map((x,i)=>'<span><i class="legend-dot '+modifier(i)+'"></i>'+x+'</span>').join('');
-  return '<section class="panel chart-panel">'+head(occupancy?'Parking occupancy':'Parking activity',occupancy?'Peak vehicles parked in each interval':'Vehicle entries and exits by '+(week?'day':'two-hour interval'),filtersHtml)+
+  return '<section class="panel chart-panel">'+head(occupancy?'Parking occupancy':'Parking activity',occupancy?'Peak vehicles parked in each interval':'Vehicle entries and exits by '+(daily?'day':'two-hour interval'),filtersHtml)+
     '<div class="chart-scroll"><div class="chart-layout" role="img" aria-label="'+esc(groups.map(g=>g.label+' '+g.amounts.map((v,i)=>labels[i]+' '+v).join(', ')).join('; '))+'"><div class="axis">'+
     [max,max*.75,max*.5,max*.25,0].map(n=>'<span>'+n+'</span>').join('')+'</div><div class="plot"><div class="gridlines"><i></i><i></i><i></i><i></i><i></i></div><div class="bars">'+bars+'</div></div></div></div><div class="chart-legend">'+legend+'</div></section>';
 }
@@ -155,7 +158,7 @@ function overview() {
   const recent=[...data.records].sort((a,b)=>String(b.exited||b.entered).localeCompare(a.exited||a.entered)).slice(0,5);
   return metrics(refs.active)+'<div class="overview-grid">'+traffic()+zones(refs.active)+'</div><section class="panel">'+
     head('Recent parking activity','Latest check-ins and check-outs','<a class="plain-button" href="#log">View full log '+icon('arrow')+'</a>')+recordsTable(recent,refs,true)+'</section>'+
-    (data.demo?'<div class="demo-note"><span>Sample vehicles and visits are loaded. Sample records can be cleared before using the register.</span><button type="button" class="plain-button" data-dialog="clear">Clear sample records</button></div>':'');
+    (data.demo?'<div class="demo-note"><span>Fictional demo vehicles and parking activity are loaded. Clear them before using the register with real records.</span><button type="button" class="plain-button" data-dialog="clear">Clear sample records</button></div>':'');
 }
 function slotsView() {
   const refs=lookup(), f=filters.slots;
@@ -163,7 +166,7 @@ function slotsView() {
   const cards=data.slots.filter(s=>(f.kind==='all'||s.type===f.kind)&&(f.area==='all'||s.location===f.area)&&
     (f.availability==='all'||refs.active.has(s.id)===(f.availability==='occupied'))).map(s=>{
       const active=refs.active.get(s.id);
-      const inner='<strong>'+esc(s.id)+'</strong><small>'+esc(s.location)+' · '+esc(s.type)+'</small>'+ (active?pill(refs.vehicle.get(active.vehicle_id).plate):pill('Available','green'));
+      const inner='<strong>'+esc(s.id)+'</strong><small>'+esc(s.location)+' · '+esc(s.type)+'</small>'+ (active?pill(displayPlate(refs.vehicle.get(active.vehicle_id).plate)):pill('Available','green'));
       return active?'<div class="slot busy">'+inner+'</div>':'<button type="button" class="slot free" data-dialog="entry" data-slot="'+esc(s.id)+'">'+inner+'</button>';
     });
   return '<section class="panel">'+head('Parking areas','Select a free slot to check in a vehicle.')+
@@ -179,7 +182,7 @@ function logView() {
     const dateMatch=!f.date||isoDay.format(new Date(r.entered))===f.date;
     const statusMatch=f.activity==='all'||(f.activity==='parked'&&isOpen(r))||(f.activity==='exited'&&!isOpen(r))||
       (f.activity==='review'&&isOpen(r)&&Date.parse(data.updated)-Date.parse(r.entered)>8*3600000);
-    return dateMatch&&statusMatch&&matches(f.q,v.plate,v.type,nameOf(s),s.id,r.slot_id);
+    return dateMatch&&statusMatch&&matches(f.q,v.plate,displayPlate(v.plate),v.type,nameOf(s),s.id,r.slot_id);
   });
   const finished=records.filter(r=>r.exited);
   const average=finished.length?duration(finished.reduce((total,r)=>total+Date.parse(r.exited)-Date.parse(r.entered),0)/finished.length):'—';
@@ -249,7 +252,7 @@ async function refresh(force=false){
     if(started<lastRefresh) return;
     lastRefresh=started;
     data=snapshot;
-    status(true, 'Live register · '+(data.demo?'Sample data · ':'')+'Updated '+clock.format(new Date(data.updated)));
+    status(true, 'Live register · Updated '+clock.format(new Date(data.updated)));
     render(Boolean(document.activeElement?.dataset.filter));
   } catch(err) {
     status(false,data?'Could not refresh. Showing the last available records.':'Unable to load the parking database.');
@@ -271,11 +274,11 @@ function popup(action, element) {
   const configs={
     entry:['Record vehicle entry','Check in a registered vehicle with a valid parking pass.',
       field('Vehicle number',input('plate', required+' placeholder="Enter vehicle number" list="entry-plates"')+
-        list('entry-plates', data.vehicles.map(v=>[v.plate,nameOf(refs.student.get(v.student_id))])))+
+        list('entry-plates', data.vehicles.map(v=>[displayPlate(v.plate),nameOf(refs.student.get(v.student_id))])))+
       field('Available slot','<select name="slot" required></select>'),'Check in','entry'],
     exit:['Record vehicle exit','Record an exit and release the assigned slot.',
       field('Vehicle number',input('plate',required+' placeholder="Enter vehicle number" list="active-plates"')+
-        list('active-plates',[...refs.active.values()].map(r=>[refs.vehicle.get(r.vehicle_id).plate,r.slot_id]))),'Check out','exit'],
+        list('active-plates',[...refs.active.values()].map(r=>[displayPlate(refs.vehicle.get(r.vehicle_id).plate),r.slot_id]))),'Check out','exit'],
     vehicle:['Register vehicle','Use an existing student ID or enter details for a new student.',
       pair(field('Vehicle number', input('plate',required+' placeholder="Registration number"')),
         field('Vehicle type','<select name="type" required>'+options(choicesOf(['Car','Two-wheeler']))+'</select>'))+

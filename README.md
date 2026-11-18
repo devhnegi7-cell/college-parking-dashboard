@@ -10,7 +10,7 @@ CampusPark is a DBMS project for recording vehicle entry and exit, assigning par
 
 | Page | What you can do |
 |---|---|
-| Overview | See total, occupied and available slots. Switch between traffic and occupancy charts for today, yesterday, or the last seven days. |
+| Overview | See total, occupied and available slots. Switch between traffic and occupancy charts for today, yesterday, the last seven days, or the last 14 full days. |
 | Parking slots | Filter slots by location, vehicle type, and availability. Select a free slot to start a check-in. |
 | Entry & exit log | Search by vehicle plate, student ID, name, or slot. Filter by entry date and status, review unusually long open visits, and see average completed parking duration. |
 | Vehicles | Register a car or bike, associate it with a student, and look up the owner by vehicle number. |
@@ -62,13 +62,13 @@ cd college-parking-dashboard
 npm run dev
 ```
 
-Open [localhost:3000](http://localhost:3000/). The app creates a local database in `.local/parking.sqlite` and loads fictional students, vehicles, passes, and recent visits on the first request. Those records are labeled as sample data in the dashboard.
+Open [localhost:3000](http://localhost:3000/). The app creates a local database in `.local/parking.sqlite` and loads fictional students, vehicles, passes, and two weeks of sample visits on the first request. Those records are labeled as sample data in the dashboard.
 
 ### Try a complete parking visit
 
-1. On **Overview**, choose **Record exit** and enter `DEMO1001`.
+1. On **Overview**, choose **Record exit** and enter `HR 51 QZ 4816`.
 2. Go to **Parking slots** and find `A-01`. It should now show **Available**.
-3. Select the slot, enter `DEMO1001`, and choose **Check in**. The slot becomes occupied and a new record appears in the log.
+3. Select the slot, enter `HR 51 QZ 4816`, and choose **Check in**. The slot becomes occupied and a new record appears in the log.
 4. Under **Parking passes**, use the status filter to inspect the sample expired and expiring passes.
 
 **Clear sample records** on the overview removes visits linked to sample vehicles and unused sample registrations. The slot inventory and non-sample vehicles and visits remain available.
